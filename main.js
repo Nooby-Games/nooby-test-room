@@ -1,7 +1,12 @@
+// Firebase Imports (ES Modules)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js";
-import { getFirestore, doc, setDoc, addDoc, collection, onSnapshot, serverTimestamp, query, orderBy, getDoc } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js";
+import { 
+  getFirestore, doc, setDoc, addDoc, 
+  collection, onSnapshot, serverTimestamp, 
+  query, orderBy, getDoc 
+} from "https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js";
 
-// Firebase configuration
+// Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyBgkuvc-KFsWtNl_9E1xXSTHQZbrLJy2To",
   authDomain: "charoom-1bc36.firebaseapp.com",
@@ -11,201 +16,200 @@ const firebaseConfig = {
   appId: "1:553045103803:web:3c6e2b614272cab867059e"
 };
 
+// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-// DOM elements
-const usernameInput = document.getElementById("username");
-const roomCodeInput = document.getElementById("room-code");
-const createRoomBtn = document.getElementById("create-room-btn");
-const joinRoomBtn = document.getElementById("join-room-btn");
-const chatSection = document.getElementById("chat-section");
-const authSection = document.getElementById("auth-section");
-const chatBox = document.getElementById("chat-box");
-const messageInput = document.getElementById("message-input");
-const sendBtn = document.getElementById("send-btn");
-const leaveRoomBtn = document.getElementById("leave-room-btn");
-const roomTitle = document.getElementById("room-id");
+// DOM Elements
+const elements = {
+  usernameInput: document.getElementById("username"),
+  roomCodeInput: document.getElementById("room-code"),
+  createRoomBtn: document.getElementById("create-room-btn"),
+  joinRoomBtn: document.getElementById("join-room-btn"),
+  chatSection: document.getElementById("chat-section"),
+  authSection: document.getElementById("auth-section"),
+  chatBox: document.getElementById("chat-box"),
+  messageInput: document.getElementById("message-input"),
+  sendBtn: document.getElementById("send-btn"),
+  leaveRoomBtn: document.getElementById("leave-room-btn"),
+  roomTitle: document.getElementById("room-id"),
+  toast: document.getElementById("toast"),
+  toast2: document.getElementById("toast2")
+};
 
 let roomId;
 let username;
 
-// Perspective API key
+// Perspective API Configuration
 const perspectiveApiKey = 'AIzaSyDQpDRlAG4toBVY2vzV1blqwx9VzC1U0HA';
 
-// Function to check for profanity using Perspective API
-async function containsProfanity(message) {
-  const url = `https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key=${perspectiveApiKey}`;
-  const data = {
-    comment: { text: message },
-    languages: ["en"],
-    requestedAttributes: {
-      TOXICITY: {},
-      SEVERE_TOXICITY: {},
-      INSULT: {},
-      PROFANITY: {},
-      THREAT: {}
-    }
-  };
+// Profanity Check Function
+async function containsProfanity(text) {
+  try {
+    const url = `https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key=${perspectiveApiKey}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        comment: { text },
+        languages: ["en"],
+        requestedAttributes: {
+          TOXICITY: {}, SEVERE_TOXICITY: {}, INSULT: {}, 
+          PROFANITY: {}, THREAT: {}
+        }
+      })
+    });
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(data)
-  });
-
-  const result = await response.json();
-  const scores = result.attributeScores;
-
-  return (
-    scores.TOXICITY.summaryScore.value >= 0.3 ||
-    scores.SEVERE_TOXICITY.summaryScore.value >= 0.3 ||
-    scores.INSULT.summaryScore.value >= 0.3 ||
-    scores.PROFANITY.summaryScore.value >= 0.3 ||
-    scores.THREAT.summaryScore.value >= 0.3
-  );
+    const result = await response.json();
+    return Object.values(result.attributeScores)
+      .some(score => score.summaryScore.value >= 0.3);
+  } catch (error) {
+    console.error("Profanity check failed:", error);
+    return false;
+  }
 }
 
-// Toast notification
-function showToast(message) {
-  const toast = document.getElementById("toast");
-  toast.textContent = message;
+// Toast Notification System
+function showToast(message, isError = true) {
+  const toast = isError ? elements.toast : elements.toast2;
+  toast.querySelector("i").parentNode.textContent = message;
   toast.classList.add("show");
-  setTimeout(() => toast.classList.remove("show"), 6000);
+  setTimeout(() => toast.classList.remove("show"), 3000);
 }
 
-// Show chat section
+// Chat Interface Management
 function showChatSection() {
-  authSection.style.display = "none";
-  chatSection.style.display = "block";
+  elements.authSection.style.display = "none";
+  elements.chatSection.style.display = "block";
+  elements.messageInput.focus();
 }
 
 function clearChatBox() {
-  chatBox.innerHTML = "";
+  elements.chatBox.innerHTML = "";
 }
 
-// Listen for new messages in the Firestore database
+// Real-time Message Listener
 function listenForMessages() {
-  const q = query(collection(db, "rooms", roomId, "messages"), orderBy("timestamp"));
+  const messagesRef = collection(db, "rooms", roomId, "messages");
+  const q = query(messagesRef, orderBy("timestamp"));
+  
   onSnapshot(q, (snapshot) => {
-    snapshot.docChanges().forEach((change) => {
-      if (change.type === "added") {
-        const { username, text } = change.doc.data();
-        const msgEl = document.createElement("p");
-        const usernameSpan = document.createElement("span");
-        usernameSpan.style.color = "#1f51ff";
-        usernameSpan.textContent = username;
-        usernameSpan.style.fontWeight = "bold";
-        const messageText = document.createTextNode(`: ${text}`);
-        msgEl.appendChild(usernameSpan);
-        msgEl.appendChild(messageText);
-        chatBox.appendChild(msgEl);
-      }
+    clearChatBox();
+    snapshot.forEach(doc => {
+      const { username, text } = doc.data();
+      const messageElement = document.createElement("p");
+      messageElement.innerHTML = `
+        <span style="color: #1f51ff; font-weight: bold;">
+          ${username}
+        </span>: ${text}
+      `;
+      elements.chatBox.appendChild(messageElement);
     });
-    chatBox.scrollTop = chatBox.scrollHeight;
+    elements.chatBox.scrollTop = elements.chatBox.scrollHeight;
   });
 }
 
-// Function to validate username
-async function validateUsername(username) {
-if (username.length > 40) {
-showToast("shorten ur username lol");
-return false;
-}
-if (await containsProfanity(username)) {
-showToast("you thought :P");
-return false;
-}
-return true;
-}
+// Room Creation Handler
+elements.createRoomBtn.addEventListener("click", async () => {
+  username = elements.usernameInput.value.trim();
+  if (!username) return showToast("Username required", true);
 
-// Create a new room
-createRoomBtn.addEventListener("click", async () => {
-username = usernameInput.value.trim();
-if (!username) return showToast("you forgot your username ._.");
+  try {
+    if (await containsProfanity(username)) {
+      return showToast("Invalid username", true);
+    }
 
-if (!(await validateUsername(username))) return; // Validate username
-
-roomId = Math.random().toString(36).substring(2, 8);
-await setDoc(doc(db, "rooms", roomId), {});
-roomTitle.textContent = `${roomId}`;
-showChatSection();
-listenForMessages();
+    roomId = Math.random().toString(36).substring(2, 8);
+    await setDoc(doc(db, "rooms", roomId), {
+      created: serverTimestamp()
+    });
+    elements.roomTitle.textContent = roomId;
+    showChatSection();
+    listenForMessages();
+  } catch (error) {
+    showToast("Failed to create room", true);
+    console.error("Room creation error:", error);
+  }
 });
 
-// Join an existing room
-joinRoomBtn.addEventListener("click", async () => {
-username = usernameInput.value.trim();
-roomId = roomCodeInput.value.trim();
+// Room Joining Handler
+elements.joinRoomBtn.addEventListener("click", async () => {
+  username = elements.usernameInput.value.trim();
+  roomId = elements.roomCodeInput.value.trim();
 
-if (!username || !roomId) return showToast("forgetting something? (room code and/or username)");
+  if (!username || !roomId) {
+    return showToast("Username and room code required", true);
+  }
 
-if (!(await validateUsername(username))) return; // Validate username
+  try {
+    if (await containsProfanity(username)) {
+      return showToast("Invalid username", true);
+    }
 
-const roomDoc = await getDoc(doc(db, "rooms", roomId));
-if (!roomDoc.exists()) return showToast("we couldn't find that room :(");
+    const roomDoc = await getDoc(doc(db, "rooms", roomId));
+    if (!roomDoc.exists()) {
+      return showToast("Room not found", true);
+    }
 
-roomTitle.textContent = `${roomId}`;
-showChatSection();
-listenForMessages();
+    elements.roomTitle.textContent = roomId;
+    showChatSection();
+    listenForMessages();
+  } catch (error) {
+    showToast("Failed to join room", true);
+    console.error("Room join error:", error);
+  }
 });
 
-// Send a message
-sendBtn.addEventListener("click", sendMessage);
-messageInput.addEventListener("keydown", (e) => {
+// Message Sending System
+elements.sendBtn.addEventListener("click", sendMessage);
+elements.messageInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") sendMessage();
 });
 
 async function sendMessage() {
-  let message = messageInput.value.trim();
-  
+  const message = elements.messageInput.value.trim();
   if (!message) return;
-  
-  // Check if the message is longer than 100 characters
-  if (message.length > 300 || message.length < 2) {
-    showToast("stop trying to break the chat or spell something out.");
-    return;
-  }
 
-  // Check for profanity using Perspective API
-  if (await containsProfanity(message)) {
-    showToast("nice try buddy. not having another incident.");
-    return;
-  }
+  try {
+    if (message.length > 300 || message.length < 2) {
+      return showToast("Message must be 2-300 characters", true);
+    }
 
-  // Send message to Firestore
-  await addDoc(collection(db, "rooms", roomId, "messages"), {
-    username,
-    text: message,
-    timestamp: serverTimestamp()
-  });
-  messageInput.value = ""; // Clear the input field
+    if (await containsProfanity(message)) {
+      return showToast("Message blocked", true);
+    }
+
+    await addDoc(collection(db, "rooms", roomId, "messages"), {
+      username,
+      text: message,
+      timestamp: serverTimestamp()
+    });
+    elements.messageInput.value = "";
+  } catch (error) {
+    showToast("Failed to send message", true);
+    console.error("Message send error:", error);
+  }
 }
 
+// Room Code Copy Feature
+elements.roomTitle.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(roomId);
+    showToast("Room code copied!", false);
+  } catch (error) {
+    showToast("Failed to copy code", true);
+    console.error("Copy error:", error);
+  }
+});
 
-
-
-
-// Leave the room and reload the page
-leaveRoomBtn.addEventListener("click", () => {
+// Room Exit Handler
+elements.leaveRoomBtn.addEventListener("click", () => {
   location.reload();
 });
 
-
-const roomCodeElement = document.getElementById("room-id");
-roomCodeElement.addEventListener("click", () => {
-const roomCode = roomCodeElement.textContent.trim(); 
-console.log("Room Code: ", roomCode); 
-navigator.clipboard.writeText(roomCode)
-.then(() => showToast("code copied to clipboard :D"))
-.catch((error) => console.error("looks like we couldn't copy that text. \n error:", error));
+// Keyboard Focus Enhancement
+document.addEventListener('keydown', (e) => {
+  if (e.key.length === 1 && /[a-z]/i.test(e.key)) {
+    elements.messageInput.focus();
+  }
 });
-
-if (event.key.length === 1 && event.key.match(/[a-z]/i)) {
-const textBox = document.getElementById('message-input');
-if (message-input) {
-  message-input.focus();
-}
-}
